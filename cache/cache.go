@@ -1,6 +1,8 @@
 package cache
 
-import "sync"
+import (
+	"sync"
+)
 
 type Cache struct {
 	mutex  sync.RWMutex
@@ -24,4 +26,14 @@ func (c *Cache) GetValue(key string) (interface{}, bool) {
 	defer c.mutex.RUnlock()
 	value, ok := c.values[key]
 	return value, ok
+}
+
+func (c *Cache) DeleteValue(key string) {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+	delete(c.values, key)
+}
+
+func (c Cache) GetSize() int {
+	return len(c.values)
 }
