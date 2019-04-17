@@ -1,4 +1,4 @@
-package server
+package main
 
 import (
 	"fmt"
@@ -12,7 +12,8 @@ type Server struct {
 }
 
 func (s *Server) Start() {
-	http.HandleFunc("/search", search.SearchHandler)
+	searchHandler := search.NewSearchHandler()
+	http.HandleFunc("/search", searchHandler.HandleSearch)
 
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", s.Port), nil))
 }
