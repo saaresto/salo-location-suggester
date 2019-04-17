@@ -15,5 +15,6 @@ func (s *Server) Start() {
 	searchHandler := search.NewSearchHandler()
 	http.HandleFunc("/search", searchHandler.HandleSearch)
 
+	log.Printf("Server started at port :%d", s.Port)
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", s.Port), nil))
 }

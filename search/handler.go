@@ -1,11 +1,14 @@
 package search
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"github.com/saaresto/salo-location-suggester/cache"
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 )
 
@@ -53,7 +56,7 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 
 		// put them in the cache asynchronously
 		go func() {
-			log.Printf("Updating %d places in cache", len(formattedPlaces))
+			log.Printf("Updating %d places in cache for term %s", len(formattedPlaces), term)
 			sh.cache.PutValue(term, response)
 		}()
 
@@ -84,9 +87,23 @@ func (sh *SearchHandler) sendPlacesRequest(term, locale string) ([]SaloResponse,
 	request.URL.RawQuery = query.Encode()
 
 	log.Printf("Sending request to %s", request.URL.String())
-	client := http.Client{
-		Timeout: sh.apiTimeout,
+
+	tlsParam := os.Getenv("USE_TLS")
+	var useTls bool
+	if len(tlsParam) == 0 {
+		useTls = true // turn it on by default
+	} else {
+		useTls, _ = strconv.ParseBool(tlsParam)
 	}
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: !useTls},
+	}
+
+	client := http.Client{
+		Timeout:   sh.apiTimeout,
+		Transport: tr,
+	}
+
 	response, err := client.Do(request)
 	if err != nil {
 		log.Println("Could not get response from aviasales api:", err)
