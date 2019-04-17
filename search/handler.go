@@ -69,7 +69,7 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 			writeJsonResponse(w, value)
 		} else {
 			log.Printf("No suitable records found in cache for term '%s'", term)
-			writeJsonResponse(w, make([]byte, 0))
+			writeJsonResponse(w, []byte("[]"))
 		}
 	}
 }
