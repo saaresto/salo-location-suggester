@@ -33,6 +33,9 @@ func (sh *Handler) SetApiTimeout(timeout time.Duration) {
 }
 
 func (sh *Handler) HandleSearch(w http.ResponseWriter, r *http.Request) {
+	// get unique id to log request based on timestamp (since generating uuid requires additional dependency)
+	requestId := strconv.FormatInt(time.Now().UTC().UnixNano(), 10)[6:15]
+
 	var (
 		term   = r.URL.Query().Get("term")
 		locale = r.URL.Query().Get("locale")
@@ -40,15 +43,15 @@ func (sh *Handler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 
 	if term == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		log.Printf("Invalid request params: %s", r.URL.String())
+		log.Printf("%s - Invalid request params: %s", requestId, r.URL.String())
 		return
 	}
 
 	// todo consider using channels to implement timeout
-	places, err := sh.sendPlacesRequest(term, locale)
+	places, err := sh.sendPlacesRequest(term, locale, requestId)
 
 	if err == nil {
-		log.Printf("Transforming response from aviasales api")
+		log.Printf("%s - Transforming response from aviasales api", requestId)
 		var formattedPlaces []TPResponse
 		for _, place := range places {
 			formattedPlaces = append(formattedPlaces, ConvertResponse(place))
@@ -57,28 +60,28 @@ func (sh *Handler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 
 		// put them in the cache asynchronously
 		go func() {
-			log.Printf("Updating %d places in cache for term %s", len(formattedPlaces), term)
+			log.Printf("%s - Updating %d places in cache for term %s", requestId, len(formattedPlaces), term)
 			sh.cache.PutValue(term, response)
 		}()
 
 		writeJsonResponse(w, response)
 	} else {
-		log.Printf("Looking for cached places")
+		log.Printf("%s - Error occured while sending request to aviasales api: %v", requestId, err)
 		value, ok := sh.cache.GetValue(term)
 		if ok {
+			log.Printf("%s - Returning cached values", requestId)
 			value := value.([]byte)
 			writeJsonResponse(w, value)
 		} else {
-			log.Printf("No suitable records found in cache for term '%s'", term)
+			log.Printf("%s - No suitable records found in cache for term '%s'", requestId, term)
 			writeJsonResponse(w, []byte("[]"))
 		}
 	}
 }
 
-func (sh *Handler) sendPlacesRequest(term, locale string) ([]SaloResponse, error) {
+func (sh *Handler) sendPlacesRequest(term, locale, requestId string) ([]SaloResponse, error) {
 	request, err := http.NewRequest("GET", ApiUrl, nil)
 	if err != nil {
-		log.Println("Could not create http request")
 		return nil, err
 	}
 
@@ -87,7 +90,7 @@ func (sh *Handler) sendPlacesRequest(term, locale string) ([]SaloResponse, error
 	query.Add("locale", locale)
 	request.URL.RawQuery = query.Encode()
 
-	log.Printf("Sending request to %s", request.URL.String())
+	log.Printf("%s - Sending request to %s", requestId, request.URL.String())
 
 	tlsParam := os.Getenv("USE_TLS")
 	var useTls bool
@@ -107,7 +110,6 @@ func (sh *Handler) sendPlacesRequest(term, locale string) ([]SaloResponse, error
 
 	response, err := client.Do(request)
 	if err != nil {
-		log.Println("Could not get response from aviasales api:", err)
 		return nil, err
 	}
 	defer response.Body.Close()

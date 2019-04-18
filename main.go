@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"strconv"
@@ -16,8 +15,7 @@ func main() {
 	}
 	port, err := strconv.Atoi(envPort)
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(2)
+		log.Fatal(err)
 	}
 	srv := Server{int(port)}
 
