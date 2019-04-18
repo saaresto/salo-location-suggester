@@ -12,27 +12,27 @@ import (
 	"time"
 )
 
-const API_URL string = "https://places.aviasales.ru/v2/places.json"
+const ApiUrl string = "https://places.aviasales.ru/v2/places.json"
 
-type SearchHandler struct {
+type Handler struct {
 	cache      *cache.Cache
 	apiTimeout time.Duration
 }
 
-func NewSearchHandler() *SearchHandler {
-	return &SearchHandler{
+func NewSearchHandler() *Handler {
+	return &Handler{
 		cache:      cache.InitializeCache(),
 		apiTimeout: 3 * time.Second,
 	}
 }
 
 // this is just for testing purposes
-func (sh *SearchHandler) SetApiTimeout(timeout time.Duration) {
+func (sh *Handler) SetApiTimeout(timeout time.Duration) {
 	log.Printf("Setting search api timeout to %d", timeout)
 	sh.apiTimeout = timeout
 }
 
-func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
+func (sh *Handler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 	var (
 		term   = r.URL.Query().Get("term")
 		locale = r.URL.Query().Get("locale")
@@ -44,11 +44,12 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// todo consider using channels to implement timeout
 	places, err := sh.sendPlacesRequest(term, locale)
 
 	if err == nil {
 		log.Printf("Transforming response from aviasales api")
-		formattedPlaces := []TPResponse{}
+		var formattedPlaces []TPResponse
 		for _, place := range places {
 			formattedPlaces = append(formattedPlaces, ConvertResponse(place))
 		}
@@ -74,8 +75,8 @@ func (sh *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (sh *SearchHandler) sendPlacesRequest(term, locale string) ([]SaloResponse, error) {
-	request, err := http.NewRequest("GET", API_URL, nil)
+func (sh *Handler) sendPlacesRequest(term, locale string) ([]SaloResponse, error) {
+	request, err := http.NewRequest("GET", ApiUrl, nil)
 	if err != nil {
 		log.Println("Could not create http request")
 		return nil, err
