@@ -26,12 +26,6 @@ func NewSearchHandler() *Handler {
 	}
 }
 
-// this is just for testing purposes
-func (sh *Handler) SetApiTimeout(timeout time.Duration) {
-	log.Printf("Setting search api timeout to %d", timeout)
-	sh.apiTimeout = timeout
-}
-
 func (sh *Handler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 	// get unique id to log request based on timestamp (since generating uuid requires additional dependency)
 	requestId := strconv.FormatInt(time.Now().UTC().UnixNano(), 10)[6:15]
@@ -47,42 +41,64 @@ func (sh *Handler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// todo consider using channels to implement timeout
-	places, err := sh.sendPlacesRequest(term, locale, requestId)
+	responseChan := make(chan []SaloResponse)
+	errorChan := make(chan error)
+	go func() {
+		sh.sendPlacesRequest(term, locale, requestId, responseChan, errorChan)
+	}()
 
-	if err == nil {
-		log.Printf("%s - Transforming response from aviasales api", requestId)
-		var formattedPlaces []TPResponse
-		for _, place := range places {
-			formattedPlaces = append(formattedPlaces, ConvertResponse(place))
+	select {
+	case places := <-responseChan:
+		{
+			log.Printf("%s - Transforming response from aviasales api", requestId)
+			var formattedPlaces []TPResponse
+			for _, place := range places {
+				formattedPlaces = append(formattedPlaces, ConvertResponse(place))
+			}
+			response, _ := json.Marshal(formattedPlaces)
+
+			// put them in the cache asynchronously
+			go func() {
+				log.Printf("%s - Updating %d places in cache for term %s", requestId, len(formattedPlaces), term)
+				sh.cache.PutValue(term, response)
+			}()
+
+			writeJsonResponse(w, response)
 		}
-		response, _ := json.Marshal(formattedPlaces)
-
-		// put them in the cache asynchronously
-		go func() {
-			log.Printf("%s - Updating %d places in cache for term %s", requestId, len(formattedPlaces), term)
-			sh.cache.PutValue(term, response)
-		}()
-
-		writeJsonResponse(w, response)
-	} else {
-		log.Printf("%s - Error occured while sending request to aviasales api: %v", requestId, err)
-		value, ok := sh.cache.GetValue(term)
-		if ok {
-			log.Printf("%s - Returning cached values", requestId)
-			value := value.([]byte)
-			writeJsonResponse(w, value)
-		} else {
-			log.Printf("%s - No suitable records found in cache for term '%s'", requestId, term)
-			writeJsonResponse(w, []byte("[]"))
+	case err := <-errorChan:
+		{
+			log.Printf("%s - Error occured while sending request to aviasales api: %v", requestId, err)
+			value, ok := sh.cache.GetValue(term)
+			if ok {
+				log.Printf("%s - Returning cached values", requestId)
+				value := value.([]byte)
+				writeJsonResponse(w, value)
+			} else {
+				log.Printf("%s - No suitable records found in cache for term '%s'", requestId, term)
+				writeJsonResponse(w, []byte("[]"))
+			}
+		}
+	case <-time.After(sh.apiTimeout):
+		{
+			log.Printf("%s - Timeout expired while sending request to aviasales api", requestId)
+			value, ok := sh.cache.GetValue(term)
+			if ok {
+				log.Printf("%s - Returning cached values", requestId)
+				value := value.([]byte)
+				writeJsonResponse(w, value)
+			} else {
+				log.Printf("%s - No suitable records found in cache for term '%s'", requestId, term)
+				writeJsonResponse(w, []byte("[]"))
+			}
 		}
 	}
 }
 
-func (sh *Handler) sendPlacesRequest(term, locale, requestId string) ([]SaloResponse, error) {
+func (sh *Handler) sendPlacesRequest(term, locale, requestId string, responseChan chan []SaloResponse, errorChan chan error) {
 	request, err := http.NewRequest("GET", ApiUrl, nil)
 	if err != nil {
-		return nil, err
+		errorChan <- err
+		return
 	}
 
 	query := request.URL.Query()
@@ -104,21 +120,25 @@ func (sh *Handler) sendPlacesRequest(term, locale, requestId string) ([]SaloResp
 	}
 
 	client := http.Client{
-		Timeout:   sh.apiTimeout,
 		Transport: tr,
 	}
 
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, err
+		errorChan <- err
+		return
 	}
 	defer response.Body.Close()
 
 	responseBody, _ := ioutil.ReadAll(response.Body)
-	var formattedResponse []SaloResponse
-	err = json.Unmarshal(responseBody, &formattedResponse)
+	var deserializedResponse []SaloResponse
+	err = json.Unmarshal(responseBody, &deserializedResponse)
+	if err != nil {
+		errorChan <- err
+		return
+	}
 
-	return formattedResponse, err
+	responseChan <- deserializedResponse
 }
 
 func writeJsonResponse(w http.ResponseWriter, response []byte) {
